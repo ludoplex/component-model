@@ -78,9 +78,7 @@ class FuncType(ExternType):
   def extract_types(self, vec):
     if len(vec) == 0:
       return []
-    if isinstance(vec[0], ValType):
-      return vec
-    return [t for name,t in vec]
+    return vec if isinstance(vec[0], ValType) else [t for name,t in vec]
 
 @dataclass
 class ValueType(ExternType):
@@ -223,8 +221,7 @@ def max_case_alignment(cases):
 def alignment_flags(labels):
   n = len(labels)
   if n <= 8: return 1
-  if n <= 16: return 2
-  return 4
+  return 2 if n <= 16 else 4
 
 ### Size
 
@@ -269,8 +266,7 @@ def size_flags(labels):
   n = len(labels)
   assert(n > 0)
   if n <= 8: return 1
-  if n <= 16: return 2
-  return 4 * num_i32_flags(labels)
+  return 2 if n <= 16 else 4 * num_i32_flags(labels)
 
 def num_i32_flags(labels):
   return math.ceil(len(labels) / 32)
@@ -368,7 +364,7 @@ class HandleTables:
   rt_to_table: MutableMapping[ResourceType, HandleTable]
 
   def __init__(self):
-    self.rt_to_table = dict()
+    self.rt_to_table = {}
 
   def table(self, rt):
     if rt not in self.rt_to_table:
@@ -425,14 +421,10 @@ CANONICAL_FLOAT32_NAN = 0x7fc00000
 CANONICAL_FLOAT64_NAN = 0x7ff8000000000000
 
 def canonicalize32(f):
-  if math.isnan(f):
-    return reinterpret_i32_as_float(CANONICAL_FLOAT32_NAN)
-  return f
+  return reinterpret_i32_as_float(CANONICAL_FLOAT32_NAN) if math.isnan(f) else f
 
 def canonicalize64(f):
-  if math.isnan(f):
-    return reinterpret_i64_as_float(CANONICAL_FLOAT64_NAN)
-  return f
+  return reinterpret_i64_as_float(CANONICAL_FLOAT64_NAN) if math.isnan(f) else f
 
 def convert_i32_to_char(cx, i):
   trap_if(i >= 0x110000)
@@ -482,10 +474,7 @@ def load_list(cx, ptr, elem_type):
 def load_list_from_range(cx, ptr, length, elem_type):
   trap_if(ptr != align_to(ptr, alignment(elem_type)))
   trap_if(ptr + length * size(elem_type) > len(cx.opts.memory))
-  a = []
-  for i in range(length):
-    a.append(load(cx, ptr + i * size(elem_type), elem_type))
-  return a
+  return [load(cx, ptr + i * size(elem_type), elem_type) for i in range(length)]
 
 def load_record(cx, ptr, fields):
   record = {}
@@ -503,23 +492,23 @@ def load_variant(cx, ptr, cases):
   c = cases[case_index]
   ptr = align_to(ptr, max_case_alignment(cases))
   case_label = case_label_with_refinements(c, cases)
-  if c.t is None:
-    return { case_label: None }
-  return { case_label: load(cx, ptr, c.t) }
+  return ({
+      case_label: None
+  } if c.t is None else {
+      case_label: load(cx, ptr, c.t)
+  })
 
 def case_label_with_refinements(c, cases):
   label = c.label
   while c.refines is not None:
     c = cases[find_case(c.refines, cases)]
-    label += '|' + c.label
+    label += f'|{c.label}'
   return label
 
 def find_case(label, cases):
   matches = [i for i,c in enumerate(cases) if c.label == label]
   assert(len(matches) <= 1)
-  if len(matches) == 1:
-    return matches[0]
-  return -1
+  return matches[0] if len(matches) == 1 else -1
 
 def load_flags(cx, ptr, labels):
   i = load_int(cx, ptr, size_flags(labels))
@@ -650,7 +639,7 @@ def store_string_to_utf8(cx, src, src_code_units, worst_case_size):
   trap_if(ptr + src_code_units > len(cx.opts.memory))
   encoded = src.encode('utf-8')
   assert(src_code_units <= len(encoded))
-  cx.opts.memory[ptr : ptr+src_code_units] = encoded[0 : src_code_units]
+  cx.opts.memory[ptr : ptr+src_code_units] = encoded[:src_code_units]
   if src_code_units < len(encoded):
     trap_if(worst_case_size > MAX_STRING_BYTE_LENGTH)
     ptr = cx.opts.realloc(ptr, src_code_units, 1, worst_case_size)
@@ -673,7 +662,7 @@ def store_utf8_to_utf16(cx, src, src_code_units):
     ptr = cx.opts.realloc(ptr, worst_case_size, 2, len(encoded))
     trap_if(ptr != align_to(ptr, 2))
     trap_if(ptr + len(encoded) > len(cx.opts.memory))
-  code_units = int(len(encoded) / 2)
+  code_units = len(encoded) // 2
   return (ptr, code_units)
 
 def store_string_to_latin1_or_utf16(cx, src, src_code_units):
@@ -701,7 +690,7 @@ def store_string_to_latin1_or_utf16(cx, src, src_code_units):
         ptr = cx.opts.realloc(ptr, worst_case_size, 2, len(encoded))
         trap_if(ptr != align_to(ptr, 2))
         trap_if(ptr + len(encoded) > len(cx.opts.memory))
-      tagged_code_units = int(len(encoded) / 2) | UTF16_TAG
+      tagged_code_units = len(encoded) // 2 | UTF16_TAG
       return (ptr, tagged_code_units)
   if dst_byte_length < src_code_units:
     ptr = cx.opts.realloc(ptr, src_code_units, 2, dst_byte_length)
@@ -718,9 +707,9 @@ def store_probably_utf16_to_latin1_or_utf16(cx, src, src_code_units):
   encoded = src.encode('utf-16-le')
   cx.opts.memory[ptr : ptr+len(encoded)] = encoded
   if any(ord(c) >= (1 << 8) for c in src):
-    tagged_code_units = int(len(encoded) / 2) | UTF16_TAG
+    tagged_code_units = len(encoded) // 2 | UTF16_TAG
     return (ptr, tagged_code_units)
-  latin1_size = int(len(encoded) / 2)
+  latin1_size = len(encoded) // 2
   for i in range(latin1_size):
     cx.opts.memory[ptr + i] = cx.opts.memory[ptr + 2*i]
   ptr = cx.opts.realloc(ptr, src_byte_length, 1, latin1_size)
@@ -773,10 +762,8 @@ def store_flags(cx, v, ptr, labels):
 
 def pack_flags_into_int(v, labels):
   i = 0
-  shift = 0
-  for l in labels:
+  for shift, l in enumerate(labels):
     i |= (int(bool(v[l])) << shift)
-    shift += 1
   return i
 
 def lower_own(cx, rep, t):
@@ -891,17 +878,15 @@ def lift_flat(cx, vi, t):
     case Borrow()       : return lift_borrow(cx, vi.next('i32'), t)
 
 def lift_flat_unsigned(vi, core_width, t_width):
-  i = vi.next('i' + str(core_width))
+  i = vi.next(f'i{str(core_width)}')
   assert(0 <= i < (1 << core_width))
   return i % (1 << t_width)
 
 def lift_flat_signed(vi, core_width, t_width):
-  i = vi.next('i' + str(core_width))
+  i = vi.next(f'i{str(core_width)}')
   assert(0 <= i < (1 << core_width))
   i %= (1 << t_width)
-  if i >= (1 << (t_width - 1)):
-    return i - (1 << t_width)
-  return i
+  return i - (1 << t_width) if i >= (1 << (t_width - 1)) else i
 
 def lift_flat_string(cx, vi):
   ptr = vi.next('i32')
@@ -914,10 +899,7 @@ def lift_flat_list(cx, vi, elem_type):
   return load_list_from_range(cx, ptr, length, elem_type)
 
 def lift_flat_record(cx, vi, fields):
-  record = {}
-  for f in fields:
-    record[f.label] = lift_flat(cx, vi, f.t)
-  return record
+  return {f.label: lift_flat(cx, vi, f.t) for f in fields}
 
 def lift_flat_variant(cx, vi, cases):
   flat_types = flatten_variant(cases)
@@ -935,10 +917,7 @@ def lift_flat_variant(cx, vi, cases):
         case ('i64', 'f64') : return reinterpret_i64_as_float(x)
         case _              : return x
   c = cases[case_index]
-  if c.t is None:
-    v = None
-  else:
-    v = lift_flat(cx, CoerceValueIter(), c.t)
+  v = None if c.t is None else lift_flat(cx, CoerceValueIter(), c.t)
   for have in flat_types:
     _ = vi.next(have)
   return { case_label_with_refinements(c, cases): v }
@@ -982,7 +961,7 @@ def lower_flat(cx, v, t):
 def lower_flat_signed(i, core_bits):
   if i < 0:
     i += (1 << core_bits)
-  return [Value('i' + str(core_bits), i)]
+  return [Value(f'i{str(core_bits)}', i)]
 
 def lower_flat_string(cx, v):
   ptr, packed_length = store_string_into_range(cx, v)
@@ -1003,10 +982,7 @@ def lower_flat_variant(cx, v, cases):
   flat_types = flatten_variant(cases)
   assert(flat_types.pop(0) == 'i32')
   c = cases[case_index]
-  if c.t is None:
-    payload = []
-  else:
-    payload = lower_flat(cx, case_value, c.t)
+  payload = [] if c.t is None else lower_flat(cx, case_value, c.t)
   for i,have in enumerate(payload):
     want = flat_types.pop(0)
     match (have.t, want):
@@ -1032,14 +1008,13 @@ def lower_flat_flags(v, labels):
 
 def lift_values(cx, max_flat, vi, ts):
   flat_types = flatten_types(ts)
-  if len(flat_types) > max_flat:
-    ptr = vi.next('i32')
-    tuple_type = Tuple(ts)
-    trap_if(ptr != align_to(ptr, alignment(tuple_type)))
-    trap_if(ptr + size(tuple_type) > len(cx.opts.memory))
-    return list(load(cx, ptr, tuple_type).values())
-  else:
+  if len(flat_types) <= max_flat:
     return [ lift_flat(cx, vi, t) for t in ts ]
+  ptr = vi.next('i32')
+  tuple_type = Tuple(ts)
+  trap_if(ptr != align_to(ptr, alignment(tuple_type)))
+  trap_if(ptr + size(tuple_type) > len(cx.opts.memory))
+  return list(load(cx, ptr, tuple_type).values())
 
 def lower_values(cx, max_flat, vs, ts, out_param = None):
   flat_types = flatten_types(ts)
