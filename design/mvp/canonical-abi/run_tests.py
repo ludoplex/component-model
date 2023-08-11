@@ -27,7 +27,7 @@ class Heap:
     ret = align_to(self.last_alloc, alignment)
     self.last_alloc = ret + new_size
     if self.last_alloc > len(self.memory):
-      print('oom: have {} need {}'.format(len(self.memory), self.last_alloc))
+      print(f'oom: have {len(self.memory)} need {self.last_alloc}')
       trap()
     self.memory[ret : ret + original_size] = self.memory[original_ptr : original_ptr + original_size]
     return ret
@@ -215,7 +215,7 @@ def test_string(src_encoding, dst_encoding, s):
     test_string_internal(src_encoding, dst_encoding, s, encoded, tagged_code_units)
   elif src_encoding == 'utf16':
     encoded = s.encode('utf-16-le')
-    tagged_code_units = int(len(encoded) / 2)
+    tagged_code_units = len(encoded) // 2
     test_string_internal(src_encoding, dst_encoding, s, encoded, tagged_code_units)
   elif src_encoding == 'latin1+utf16':
     try:
@@ -225,7 +225,7 @@ def test_string(src_encoding, dst_encoding, s):
     except UnicodeEncodeError:
       pass
     encoded = s.encode('utf-16-le')
-    tagged_code_units = int(len(encoded) / 2) | UTF16_TAG
+    tagged_code_units = len(encoded) // 2 | UTF16_TAG
     test_string_internal(src_encoding, dst_encoding, s, encoded, tagged_code_units)
 
 encodings = ['utf8', 'utf16', 'latin1+utf16']
@@ -368,7 +368,7 @@ def test_roundtrip(t, v):
   got = lift_flat(caller_cx, ValueIter(flat_results), t)
 
   if got != v:
-    fail("test_roundtrip({},{},{}) got {}".format(t, v, caller_args, got))
+    fail(f"test_roundtrip({t},{v},{caller_args}) got {got}")
 
   assert(caller_inst.may_leave and caller_inst.may_enter)
   assert(callee_inst.may_leave and callee_inst.may_enter)
